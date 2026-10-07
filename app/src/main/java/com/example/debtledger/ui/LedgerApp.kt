@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
@@ -40,6 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.debtledger.R
 import com.example.debtledger.data.local.*
 import com.example.debtledger.domain.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import org.json.JSONObject
 import java.math.BigDecimal
@@ -240,7 +242,8 @@ fun LedgerApp(vm: LedgerViewModel, isDark: Boolean) {
     val error by vm.error.collectAsStateWithLifecycle()
     val darkTheme by vm.darkTheme.collectAsStateWithLifecycle()
 
-    var page by rememberSaveable { mutableStateOf("splash") }
+    var hasShownSplash by rememberSaveable { mutableStateOf(false) }
+    var page by rememberSaveable { mutableStateOf(if (hasShownSplash) "home" else "splash") }
     var personId by rememberSaveable { mutableStateOf<String?>(null) }
     var debtId by rememberSaveable { mutableStateOf<String?>(null) }
     var paymentId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -291,7 +294,10 @@ fun LedgerApp(vm: LedgerViewModel, isDark: Boolean) {
     BackHandler(enabled = page !in listOf("splash", "home") || showPersonForm || showDebtForm || showPaymentForm) { back() }
 
     if(page == "splash") {
-        SplashScreen(onTimeout = { open("home") })
+        SplashScreen(onTimeout = {
+            hasShownSplash = true
+            open("home")
+        })
         return
     }
 
@@ -1250,15 +1256,29 @@ fun LedgerApp(vm: LedgerViewModel, isDark: Boolean) {
                             listOf(
                                 Triple("نسخة احتياطية مشفرة", "هذه الميزة غير متاحة حالياً في هذا الإصدار", Icons.Default.Info),
                                 Triple("اللغة", "العربية", Icons.Default.Info),
-                                Triple("معلومات التطبيق", "دفتر الديون · الإصدار 0.1.0", Icons.Default.Info)
+                                Triple("معلومات التطبيق", "0.1.0", Icons.Default.Info)
                             ).forEach { (title, subtitle, icon) ->
                                 Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(24.dp)) {
                                     Row(Modifier.padding(20.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                                             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                            Column {
-                                                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline)
+                                            if (title == "معلومات التطبيق") {
+                                                val context = LocalContext.current
+                                                val currentVersion = remember(context) {
+                                                    runCatching {
+                                                        context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                                                    }.getOrDefault("0.1.0") ?: "0.1.0"
+                                                }
+                                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                    Text("دفتر الديون", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                                    Text("الإصدار $currentVersion", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    Text("برمجيات هوم", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                }
+                                            } else {
+                                                Column {
+                                                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                                    Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline)
+                                                }
                                             }
                                         }
                                     }
@@ -1444,62 +1464,54 @@ fun LedgerApp(vm: LedgerViewModel, isDark: Boolean) {
 @Composable
 private fun SplashScreen(onTimeout: () -> Unit) {
     LaunchedEffect(Unit) {
+        delay(1800)
         onTimeout()
     }
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color(0xFF174F79)),
+            .background(MaterialTheme.colorScheme.background),
         contentAlignment = Alignment.Center
     ) {
-        Box(Modifier.absoluteOffset((-100).dp, (-150).dp).size(280.dp).background(Color(0xFF3A82A8).copy(alpha = 0.3f), CircleShape))
-        Box(Modifier.absoluteOffset(100.dp, 200.dp).size(300.dp).background(Color(0xFF0D3959).copy(alpha = 0.7f), CircleShape))
-
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp),
             modifier = Modifier.padding(24.dp)
         ) {
             Surface(
-                shape = RoundedCornerShape(32.dp),
-                color = Color.White,
-                shadowElevation = 12.dp,
-                modifier = Modifier.size(110.dp)
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(100.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Image(
                         painter = painterResource(id = R.drawable.app_icon),
                         contentDescription = "شعار دفتر الديون",
-                        modifier = Modifier.size(90.dp)
+                        modifier = Modifier.size(64.dp)
                     )
                 }
             }
 
             Spacer(Modifier.height(8.dp))
-            Text(
-                "دفتر الديون",
-                style = MaterialTheme.typography.headlineLarge,
-                color = Color.White,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                "رتّب حساباتك، واحفظ حقوقك\nبكل بساطة ووضوح",
-                style = MaterialTheme.typography.bodyLarge,
-                color = Color.White.copy(alpha = 0.85f),
-                textAlign = TextAlign.Center
-            )
 
-            Spacer(Modifier.height(24.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(8.dp).background(Color.White.copy(alpha = 0.45f), CircleShape))
-                Box(Modifier.size(8.dp).background(Color.White.copy(alpha = 0.7f), CircleShape))
-                Box(Modifier.size(8.dp).background(Color.White, CircleShape))
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "إدارة مالية شخصية",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = "دفتر الديون",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
             }
-            Text(
-                "إدارة مالية شخصية",
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White.copy(alpha = 0.75f)
-            )
         }
     }
 }
