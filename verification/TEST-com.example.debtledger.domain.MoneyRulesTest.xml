@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.debtledger.domain.MoneyRulesTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-10-04T21:38:55" hostname="9c5bac69a8a2" time="0.035">
+  <properties/>
+  <testcase name="validatesPaymentAndEdit" classname="com.example.debtledger.domain.MoneyRulesTest" time="0.004"/>
+  <testcase name="rejectsPrecisionAndMalformedInput" classname="com.example.debtledger.domain.MoneyRulesTest" time="0.027"/>
+  <testcase name="readsArabicEnglishAndPersianDigits" classname="com.example.debtledger.domain.MoneyRulesTest" time="0.001"/>
+  <testcase name="separatesCurrenciesAndCancelledDebts" classname="com.example.debtledger.domain.MoneyRulesTest" time="0.001"/>
+  <testcase name="boundsAndOverflow" classname="com.example.debtledger.domain.MoneyRulesTest" time="0.001"/>
+  <testcase name="statuses" classname="com.example.debtledger.domain.MoneyRulesTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
