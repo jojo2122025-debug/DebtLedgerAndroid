@@ -1,7 +1,6 @@
 package com.example.debtledger
 
 import android.app.Application
-import android.content.Context
 import androidx.room.Room
 import com.example.debtledger.data.LedgerRepository
 import com.example.debtledger.data.local.AppDatabase
@@ -10,12 +9,22 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.time.LocalDate
 
 class DebtLedgerApplication : Application() {
-    val database: AppDatabase by lazy {
-        Room.databaseBuilder(this,AppDatabase::class.java,"debt-ledger.db").build()
+    var overrideDatabase: AppDatabase? = null
+    var overrideRepository: LedgerRepository? = null
+
+    val database: AppDatabase
+        get() = overrideDatabase ?: internalDatabase
+
+    val repository: LedgerRepository
+        get() = overrideRepository ?: internalRepository
+
+    private val internalDatabase: AppDatabase by lazy {
+        Room.databaseBuilder(this, AppDatabase::class.java, "debt-ledger.db").build()
     }
-    val repository: LedgerRepository by lazy {
-        LedgerRepository(database,System::currentTimeMillis) { LocalDate.now().toEpochDay() }
+    private val internalRepository: LedgerRepository by lazy {
+        LedgerRepository(internalDatabase, System::currentTimeMillis) { LocalDate.now().toEpochDay() }
     }
+
     private val _darkTheme = MutableStateFlow<Boolean?>(null)
     val darkTheme = _darkTheme.asStateFlow()
 

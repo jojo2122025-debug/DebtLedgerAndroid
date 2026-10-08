@@ -1,5 +1,10 @@
 package com.example.debtledger.ui
 
+import android.net.Uri
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -39,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.debtledger.R
+import com.example.debtledger.data.backup.*
 import com.example.debtledger.data.local.*
 import com.example.debtledger.domain.*
 import kotlinx.coroutines.delay
@@ -55,6 +61,8 @@ import java.util.UUID
 
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.graphics.SolidColor
+import java.io.IOException
+import java.io.OutputStream
 
 val SunIcon: ImageVector
     get() = ImageVector.Builder(
@@ -272,6 +280,64 @@ fun LedgerApp(vm: LedgerViewModel, isDark: Boolean) {
     val currency = Currency.valueOf(currencyCode)
     val person = persons.find { it.id == personId }
     val debt = debts.find { it.id == debtId }
+
+    val context = LocalContext.current
+    val backupMessage by vm.backupMessage.collectAsStateWithLifecycle()
+    val pendingPreviewPayload by vm.pendingPreviewPayload.collectAsStateWithLifecycle()
+
+    var showExportOptionsDialog by remember { mutableStateOf(false) }
+    var exportIsEncrypted by remember { mutableStateOf(true) }
+    var exportPassword by remember { mutableStateOf("") }
+    var exportPasswordConfirm by remember { mutableStateOf("") }
+    var exportPasswordError by remember { mutableStateOf<String?>(null) }
+
+    var selectedImportUri by remember { mutableStateOf<Uri?>(null) }
+    var showImportPasswordDialog by remember { mutableStateOf(false) }
+    var importPassword by remember { mutableStateOf("") }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        if (uri != null) {
+            val pass = if (exportIsEncrypted) exportPassword else null
+            val destination = object : BackupDestination {
+                override fun openOutputStream(): OutputStream {
+                    return context.contentResolver.openOutputStream(uri)
+                        ?: throw IOException("تعذر فتح الملف المختار للكتابة")
+                }
+
+                override fun deletePartialFile(): Boolean {
+                    return runCatching {
+                        DocumentsContract.deleteDocument(context.contentResolver, uri)
+                    }.getOrDefault(false)
+                }
+            }
+            vm.exportBackupToDestination(destination, pass)
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            selectedImportUri = uri
+            val fileName = runCatching {
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (cursor.moveToFirst() && nameIndex >= 0) cursor.getString(nameIndex) else null
+                }
+            }.getOrNull() ?: ""
+
+            if (fileName.endsWith(".dlbak", ignoreCase = true)) {
+                importPassword = ""
+                showImportPasswordDialog = true
+            } else {
+                context.contentResolver.openInputStream(uri)?.let { stream ->
+                    vm.importBackupPreview(stream, null, isEncryptedFile = false)
+                }
+            }
+        }
+    }
 
     fun open(target: String) {
         vm.clearError()
@@ -1253,8 +1319,40 @@ fun LedgerApp(vm: LedgerViewModel, isDark: Boolean) {
                                     )
                                 }
                             }
+
+                            Card(
+                                Modifier.fillMaxWidth().clickable { showExportOptionsDialog = true },
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                shape = RoundedCornerShape(24.dp)
+                            ) {
+                                Row(Modifier.padding(20.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Share, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                        Column {
+                                            Text("تصدير نسخة احتياطية", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                            Text("حفظ نسخة أمان من جميع الحسابات محلياً", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Card(
+                                Modifier.fillMaxWidth().clickable { importLauncher.launch(arrayOf("*/*", "application/json", "application/octet-stream")) },
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                shape = RoundedCornerShape(24.dp)
+                            ) {
+                                Row(Modifier.padding(20.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                        Column {
+                                            Text("استعادة نسخة احتياطية", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                            Text("استبدال البيانات الحالية بنسخة أمان محلياً", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline)
+                                        }
+                                    }
+                                }
+                            }
+
                             listOf(
-                                Triple("نسخة احتياطية مشفرة", "هذه الميزة غير متاحة حالياً في هذا الإصدار", Icons.Default.Info),
                                 Triple("اللغة", "العربية", Icons.Default.Info),
                                 Triple("معلومات التطبيق", "0.1.0", Icons.Default.Info)
                             ).forEach { (title, subtitle, icon) ->
@@ -1263,7 +1361,6 @@ fun LedgerApp(vm: LedgerViewModel, isDark: Boolean) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                                             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                                             if (title == "معلومات التطبيق") {
-                                                val context = LocalContext.current
                                                 val currentVersion = remember(context) {
                                                     runCatching {
                                                         context.packageManager.getPackageInfo(context.packageName, 0).versionName
@@ -1457,6 +1554,192 @@ fun LedgerApp(vm: LedgerViewModel, isDark: Boolean) {
                 ) { Text("تأكيد") }
             },
             dismissButton = { TextButton(enabled = !busy, onClick = { correction = null }) { Text("تراجع") } }
+        )
+    }
+
+    // Export Options Dialog
+    if (showExportOptionsDialog) {
+        AlertDialog(
+            onDismissRequest = { showExportOptionsDialog = false },
+            title = { Text("تصدير نسخة احتياطية", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text("اختر نوع النسخة الاحتياطية المفضل:")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = exportIsEncrypted,
+                            onClick = { exportIsEncrypted = true },
+                            label = { Text("مشفرة (موصى به)") },
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        FilterChip(
+                            selected = !exportIsEncrypted,
+                            onClick = { exportIsEncrypted = false },
+                            label = { Text("غير مشفرة (JSON)") },
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
+
+                    if (exportIsEncrypted) {
+                        Text("كلمة المرور تحمي بياناتك المالية من القراءة الخارجية عند مشاركة الملف.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                        OutlinedTextField(
+                            value = exportPassword,
+                            onValueChange = { exportPassword = it; exportPasswordError = null },
+                            label = { Text("كلمة المرور *") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                        )
+                        OutlinedTextField(
+                            value = exportPasswordConfirm,
+                            onValueChange = { exportPasswordConfirm = it; exportPasswordError = null },
+                            label = { Text("تأكيد كلمة المرور *") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                        )
+                        if (exportPasswordError != null) {
+                            Text(exportPasswordError!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                            Text("⚠️ تنبيه: كلمة المرور غير قابلة للاسترجاع. إذا نسيت كلمة المرور فلن تمكنك أية وسيلة من استعادة حساباتك.", color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
+                        }
+                    } else {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                            Text("⚠️ تنبيه: النسخة غير المشفرة تحتوي بيانات مالية قابلة للقراءة من أي شخص يمتلك الملف.", color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (exportIsEncrypted) {
+                            if (exportPassword.isBlank()) {
+                                exportPasswordError = "أدخل كلمة المرور"
+                                return@Button
+                            }
+                            if (exportPassword.length < 4) {
+                                exportPasswordError = "كلمة المرور يجب أن تكون 4 رموز على الأقل"
+                                return@Button
+                            }
+                            if (exportPassword != exportPasswordConfirm) {
+                                exportPasswordError = "كلمتا المرور غير متطابقتين"
+                                return@Button
+                            }
+                        }
+                        showExportOptionsDialog = false
+                        val fileName = if (exportIsEncrypted) "debt_ledger_backup_${LocalDate.now()}.dlbak" else "debt_ledger_backup_${LocalDate.now()}.json"
+                        exportLauncher.launch(fileName)
+                    }
+                ) { Text("حفظ الملف") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExportOptionsDialog = false }) { Text("إلغاء") }
+            }
+        )
+    }
+
+    // Import Password Dialog
+    if (showImportPasswordDialog && selectedImportUri != null) {
+        AlertDialog(
+            onDismissRequest = { showImportPasswordDialog = false },
+            title = { Text("فك تشفير النسخة الاحتياطية") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("أدخل كلمة المرور الخاصة بالملف المشفر:")
+                    OutlinedTextField(
+                        value = importPassword,
+                        onValueChange = { importPassword = it },
+                        label = { Text("كلمة المرور") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = importPassword.isNotBlank(),
+                    onClick = {
+                        showImportPasswordDialog = false
+                        context.contentResolver.openInputStream(selectedImportUri!!)?.let { stream ->
+                            vm.importBackupPreview(stream, importPassword, isEncryptedFile = true)
+                        }
+                    }
+                ) { Text("فحص الملف") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showImportPasswordDialog = false }) { Text("إلغاء") }
+            }
+        )
+    }
+
+    // Preview Summary Dialog
+    if (pendingPreviewPayload != null) {
+        val payload = pendingPreviewPayload!!
+        AlertDialog(
+            onDismissRequest = { vm.dismissPreview() },
+            title = { Text("معاينة النسخة الاحتياطية", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    val exportDateStr = formatDate(Instant.ofEpochMilli(payload.metadata.exportTimestamp).atZone(ZoneId.systemDefault()).toLocalDate().toEpochDay())
+                    Text("تاريخ التصدير: $exportDateStr", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    
+                    Text("محتويات النسخة الاحتياطية:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("• الأشخاص: ${payload.metadata.counts.persons}", style = MaterialTheme.typography.bodyMedium)
+                        Text("• الديون: ${payload.metadata.counts.debts}", style = MaterialTheme.typography.bodyMedium)
+                        Text("• الدفعات: ${payload.metadata.counts.payments}", style = MaterialTheme.typography.bodyMedium)
+                        Text("• سجل النشاط: ${payload.metadata.counts.auditEvents}", style = MaterialTheme.typography.bodyMedium)
+                    }
+
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                        Text(
+                            "«ستُستبدل جميع بياناتك الحالية ببيانات هذه النسخة»",
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(12.dp),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.confirmRestore {
+                            open("home")
+                            personId = null
+                            debtId = null
+                            paymentId = null
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("تأكيد الاستعادة والاستبدال") }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.dismissPreview() }) { Text("إلغاء") }
+            }
+        )
+    }
+
+    // Backup Message Alert
+    if (backupMessage != null) {
+        AlertDialog(
+            onDismissRequest = { vm.clearBackupMessage() },
+            title = { Text("النسخ الاحتياطي والاستعادة") },
+            text = { Text(backupMessage!!) },
+            confirmButton = {
+                TextButton(onClick = { vm.clearBackupMessage() }) { Text("حسناً") }
+            }
         )
     }
 }
@@ -1879,6 +2162,7 @@ private fun ActivityRowModern(event: AuditEntity, persons: List<PersonEntity>, d
 
 @Composable
 private fun PersonForm(vm: LedgerViewModel, person: PersonEntity?, busy: Boolean, onClose: () -> Unit, saved: (String) -> Unit) {
+    val formGen = remember { vm.repository.currentGeneration }
     var name by rememberSaveable { mutableStateOf(person?.name ?: "") }
     var phone by rememberSaveable { mutableStateOf(person?.phone ?: "") }
     var notes by rememberSaveable { mutableStateOf(person?.notes ?: "") }
@@ -1899,7 +2183,7 @@ private fun PersonForm(vm: LedgerViewModel, person: PersonEntity?, busy: Boolean
             enabled = !busy && name.isNotBlank(),
             onClick = {
                 if(name.isBlank()) { nameError = true; return@Button }
-                vm.act({ saved(requireNotNull(it)) }) { vm.repository.savePerson(person?.id, name, phone.ifBlank { null }, notes.ifBlank { null }) }
+                vm.act({ saved(requireNotNull(it)) }) { vm.repository.savePerson(person?.id, name, phone.ifBlank { null }, notes.ifBlank { null }, formGen) }
             },
             modifier = Modifier.fillMaxWidth().height(56.dp),
             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary),
@@ -1930,6 +2214,7 @@ private fun DebtForm(
     addPerson: () -> Unit,
     saved: (String) -> Unit
 ) {
+    val formGen = remember { vm.repository.currentGeneration }
     var selected by rememberSaveable { mutableStateOf(debt?.personId ?: draftPerson.takeIf { it.isNotEmpty() } ?: initialPerson ?: "") }
     var direction by rememberSaveable { mutableStateOf(debt?.direction?.name ?: draftDirection) }
     var currency by rememberSaveable { mutableStateOf(debt?.currency?.name ?: draftCurrency) }
@@ -2085,7 +2370,7 @@ private fun DebtForm(
                         vm.repository.saveDebt(
                             debt?.id, selected, DebtDirection.valueOf(direction),
                             Currency.valueOf(currency), parsedMoney.amountMinor, dayNum,
-                            description, notes.ifBlank { null }
+                            description, notes.ifBlank { null }, formGen
                         )
                     }
                 }
@@ -2101,6 +2386,7 @@ private fun DebtForm(
 
 @Composable
 private fun PaymentForm(vm: LedgerViewModel, debt: DebtBalance, paymentId: String?, busy: Boolean, onClose: () -> Unit, saved: () -> Unit) {
+    val formGen = remember { vm.repository.currentGeneration }
     val history by remember(debt.id) { vm.payments(debt.id) }.collectAsStateWithLifecycle(emptyList())
     val existing = history.find { it.id == paymentId }
     if(paymentId != null && existing == null) {
@@ -2181,9 +2467,9 @@ private fun PaymentForm(vm: LedgerViewModel, debt: DebtBalance, paymentId: Strin
                             val parsed = MoneyParser.positive(money, debt.currency)
                             val dayNum = day(date)
                             if(existing == null) {
-                                vm.repository.addPayment(operationId, debt.id, parsed.amountMinor, dayNum, notes.ifBlank { null })
+                                vm.repository.addPayment(operationId, debt.id, parsed.amountMinor, dayNum, notes.ifBlank { null }, formGen)
                             } else {
-                                vm.repository.editPayment(existing.id, parsed.amountMinor, dayNum, notes.ifBlank { null }, reason)
+                                vm.repository.editPayment(existing.id, parsed.amountMinor, dayNum, notes.ifBlank { null }, reason, formGen)
                                 existing.id
                             }
                         }

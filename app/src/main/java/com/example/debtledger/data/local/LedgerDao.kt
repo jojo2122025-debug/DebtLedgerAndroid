@@ -80,4 +80,38 @@ interface LedgerDao {
     fun observeActivity(limit: Int = 100): Flow<List<AuditEntity>>
     @Query("SELECT COUNT(*) FROM debts WHERE personId=:id") suspend fun debtCount(id: String): Long
     @Query("DELETE FROM persons WHERE id=:id") suspend fun deleteEmptyPerson(id: String)
+
+    // Backup & Restore queries
+    @Query("SELECT * FROM persons") suspend fun getAllPersons(): List<PersonEntity>
+    @Query("SELECT * FROM debts") suspend fun getAllDebts(): List<DebtEntity>
+    @Query("SELECT * FROM payments") suspend fun getAllPayments(): List<PaymentEntity>
+    @Query("SELECT * FROM audit_events") suspend fun getAllAuditEvents(): List<AuditEntity>
+
+    @Query("DELETE FROM audit_events") suspend fun deleteAllAuditEvents()
+    @Query("DELETE FROM payments") suspend fun deleteAllPayments()
+    @Query("DELETE FROM debts") suspend fun deleteAllDebts()
+    @Query("DELETE FROM persons") suspend fun deleteAllPersons()
+
+    @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertPersons(values: List<PersonEntity>)
+    @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertDebts(values: List<DebtEntity>)
+    @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertPayments(values: List<PaymentEntity>)
+    @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertAuditEvents(values: List<AuditEntity>)
+
+    @Transaction
+    suspend fun replaceAllData(
+        persons: List<PersonEntity>,
+        debts: List<DebtEntity>,
+        payments: List<PaymentEntity>,
+        audits: List<AuditEntity>
+    ) {
+        deleteAllAuditEvents()
+        deleteAllPayments()
+        deleteAllDebts()
+        deleteAllPersons()
+
+        insertPersons(persons)
+        insertDebts(debts)
+        insertPayments(payments)
+        insertAuditEvents(audits)
+    }
 }
